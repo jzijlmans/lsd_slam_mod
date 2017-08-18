@@ -1,9 +1,15 @@
+# Modified version of LSD-SLAM
+by Jeroen Zijlmans, original code:
+https://github.com/tum-vision/lsd_slam
+
+Original Read-me file:
+
 # LSD-SLAM: Large-Scale Direct Monocular SLAM
 
-LSD-SLAM is a novel approach to real-time monocular SLAM. It is fully direct (i.e. does not use keypoints / features) and creates large-scale, 
+LSD-SLAM is a novel approach to real-time monocular SLAM. It is fully direct (i.e. does not use keypoints / features) and creates large-scale,
 semi-dense maps in real-time on a laptop. For more information see
 [http://vision.in.tum.de/lsdslam](http://vision.in.tum.de/lsdslam)
-where you can also find the corresponding publications and Youtube videos, as well as some 
+where you can also find the corresponding publications and Youtube videos, as well as some
 example-input datasets, and the generated output as rosbag or .ply point cloud.
 
 
@@ -36,8 +42,8 @@ Play the sequence:
 
 
 
-You should see one window showing the current keyframe with color-coded depth (from live_slam), 
-and one window showing the 3D map (from viewer). If for some reason the initialization fails 
+You should see one window showing the current keyframe with color-coded depth (from live_slam),
+and one window showing the 3D map (from viewer). If for some reason the initialization fails
 (i.e., after ~5s the depth map still looks wrong), focus the depth map and hit 'r' to re-initialize.
 
 
@@ -102,7 +108,7 @@ If you want to use openFABMAP for large loop closure detection, uncomment the fo
     #set(FABMAP_LIB openFABMAP )
 
 **Note for Ubuntu 14.04:** The packaged OpenCV for Ubuntu 14.04 does not include the nonfree module, which is required for openFabMap (which requires SURF features).
-You need to get a full version of OpenCV with nonfree module, which is easiest by compiling your own version. 
+You need to get a full version of OpenCV with nonfree module, which is easiest by compiling your own version.
 We suggest to use the [2.4.8](https://github.com/Itseez/opencv/releases/tag/2.4.8) version, to assure compatibility with the current indigo open-cv package.
 
 
@@ -123,7 +129,7 @@ If you want to directly use a camera.
 
 When using ROS camera_info, only the image dimensions and the `K` matrix from the camera info messages will be used - hence the video has to be rectified.
 
-Alternatively, you can specify a calibration file using 
+Alternatively, you can specify a calibration file using
 
     rosrun lsd_slam_core live_slam /image:=<yourstreamtopic> _calib:=<calibration_file>
 
@@ -134,7 +140,7 @@ In this case, the camera_info topic is ignored, and images may also be radially 
 
     rosrun lsd_slam_core dataset_slam _files:=<files> _hz:=<hz> _calib:=<calibration_file>
 
-Here, `<files>` can either be a folder containing image files (which will be sorted alphabetically), or a text file containing one image file per line. `<hz>` is the framerate at which the images are processed, and `<calibration_file>` the camera calibration file. 
+Here, `<files>` can either be a folder containing image files (which will be sorted alphabetically), or a text file containing one image file per line. `<hz>` is the framerate at which the images are processed, and `<calibration_file>` the camera calibration file.
 
 Specify `_hz:=0` to enable sequential tracking and mapping, i.e. make sure that every frame is mapped properly. Note that while this typically will give best results, it can be much slower than real-time operation.
 
@@ -180,7 +186,7 @@ This one is without radial distortion correction, as a special case of ATAN came
 
 - `m`: Save current state of the map (depth & variance) as images to `lsd_slam_core/save/`
 
-- `p`: Brute-Force-Try to find new constraints. May improve the map by finding more constraints, but will block mapping for a while. 
+- `p`: Brute-Force-Try to find new constraints. May improve the map by finding more constraints, but will block mapping for a while.
 
 - `l`: Manually indicate that tracking is lost: will stop tracking and mapping, and start the re-localizer.
 
@@ -189,14 +195,14 @@ This one is without radial distortion correction, as a special case of ATAN came
 ### 3.1.5 Parameters (Dynamic Reconfigure)
 A number of things can be changed dynamically, using (for ROS fuerte)
 
-    rosrun dynamic_reconfigure reconfigure_gui 
+    rosrun dynamic_reconfigure reconfigure_gui
 
 or (for ROS indigo)
 
     rosrun rqt_reconfigure rqt_reconfigure
 
 Parameters are split into two parts, ones that enable / disable various sorts of debug output in `/LSD_SLAM/Debug`, and ones that affect the actual algorithm, in `/LSD_SLAM`.
-Note that debug output options from `/LSD_SLAM/Debug` only work if lsd\_slam\_core is built with debug info, e.g. with `set(ROS_BUILD_TYPE RelWithDebInfo)`. 
+Note that debug output options from `/LSD_SLAM/Debug` only work if lsd\_slam\_core is built with debug info, e.g. with `set(ROS_BUILD_TYPE RelWithDebInfo)`.
 
 * `minUseGrad`: [double] Minimal absolute image gradient for a pixel to be used at all. Increase if your camera has large image noise, decrease if you have low image-noise and want to also exploit small gradients.
 * `cameraPixelNoise`: [double] Image intensity noise used for e.g. tracking weight calculation. Should be set larger than the actual sensor-noise, to also account for noise originating from discretization / linear interpolation.
@@ -232,7 +238,7 @@ Useful for debug output are:
 
 * Use a **global shutter** camera. Using a rolling shutter will lead to inferior results.
 * Use a lens with a **wide field-of-view** (we use a 130° fisheye lens).
-* Use a **high framerate**, at least 30fps (depending on the movements speed of course). For our experiments, we used between 30 and 60 fps. 
+* Use a **high framerate**, at least 30fps (depending on the movements speed of course). For our experiments, we used between 30 and 60 fps.
 * We recommend an image resolution of **640x480**, significantly higher or lower resolutions may require some hard-coded parameters to be adapted.
 * LSD-SLAM is a monocular SLAM system, and as such cannot estimate the absolute scale of the map. Further it requires **sufficient camera translation**: Rotating the camera without translating it at the same time will not work. Generally sideways motion is best - depending on the field of view of your camera, forwards / backwards motion is equally good. Rotation around the optical axis does not cause any problems.
 * During initialization, it is best to move the camera in a circle parallel to the image without rotating it. The scene should contain sufficient structure (intensity gradient at different depths).
@@ -254,8 +260,8 @@ You can use rosbag to record and re-play the output generated by certain traject
 
 You should never have to restart the viewer node, it resets the graph automatically.
 
-If you just want to lead a certain pointcloud from a .bag file into the viewer, you 
-can directly do that using 
+If you just want to lead a certain pointcloud from a .bag file into the viewer, you
+can directly do that using
 
     rosrun lsd_slam_viewer viewer file_pc.bag
 
@@ -317,7 +323,7 @@ Instead, this is solved in LSD-SLAM by publishing keyframes and their poses sepa
 - keyframeGraphMsg contains the updated pose of each keyframe, nothing else.
 - keyframeMsg contains one frame with it's pose, and - if it is a keyframe - it's points in the form of a depth map.
 
-Points are then always kept in their keyframe's coodinate system: That way, a keyframe's pose can be changed without even touching the points. In fact, in the viewer, the points in the keyframe's coodinate frame are moved to a GLBuffer immediately and never touched again - the only thing that changes is the pushed modelViewMatrix before rendering. 
+Points are then always kept in their keyframe's coodinate system: That way, a keyframe's pose can be changed without even touching the points. In fact, in the viewer, the points in the keyframe's coodinate frame are moved to a GLBuffer immediately and never touched again - the only thing that changes is the pushed modelViewMatrix before rendering.
 
 Note that "pose" always refers to a Sim3 pose (7DoF, including scale) - which ROS doesn't even have a message type for.
 
@@ -327,5 +333,3 @@ If you need some other way in which the map is published (e.g. publish the whole
 **Tracking immediately diverges / I keep getting "TRACKING LOST for frame 34 (0.00% good Points, which is -nan% of available points, DIVERGED)!"**
 - double-check your camera calibration.
 - try more translational movement and less roational movement
-
-
