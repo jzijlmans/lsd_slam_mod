@@ -1,0 +1,12 @@
+<launch>
+
+  <node name="image_viewer" pkg="image_view" type="image_view" args="image:=/camera/rgb/image_raw" />
+
+  <include file="$(find openni2_launch)/launch/openni2.launch"/>
+
+  <node name="lsd_slam_viewer" pkg="lsd_slam_viewer" type="viewer" />
+
+  <node name="lsd_slam_core" pkg="lsd_slam_core" type="live_slam" args="/image:=/camera/rgb/image_raw _calib:=Xtion.cfg"/>
+
+  
+</launch>
