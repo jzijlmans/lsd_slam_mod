@@ -8,9 +8,9 @@ include($ENV{ROS_ROOT}/core/rosbuild/rosbuild.cmake)
 #  Release        : w/o debug symbols, w/ optimization
 #  RelWithDebInfo : w/ debug symbols, w/ optimization
 #  MinSizeRel     : w/o debug symbols, w/ optimization, stripped binaries
-set(ROS_BUILD_TYPE Release)
+set(ROS_BUILD_TYPE RelWithDebInfo)
 
-rosbuild_init() 
+rosbuild_init()
 
 set(EXECUTABLE_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/bin)
 set(LIBRARY_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/lib)
@@ -40,7 +40,7 @@ add_definitions("-DENABLE_SSE")
 # Also add some useful compiler flag
 set(CMAKE_CXX_FLAGS
    "${CMAKE_CXX_FLAGS} ${SSE_FLAGS} -march=native  -std=c++0x"
-) 
+)
 
 # Set source files
 set(lsd_SOURCE_FILES
@@ -95,4 +95,3 @@ target_link_libraries(live_slam lsdslam)
 # build image node
 rosbuild_add_executable(dataset_slam src/main_on_images.cpp)
 target_link_libraries(dataset_slam lsdslam)
-

@@ -26,7 +26,8 @@ lsd_slam_viewer/thirdparty/Sophus/CMakeFiles/
 lsd_slam_viewer/thirdparty/Sophus/Makefile
 lsd_slam_viewer/thirdparty/Sophus/SophusConfig.cmake
 
+images/
+videos/
+
 cmake_install.cmake
 *.cfgc
-
-
