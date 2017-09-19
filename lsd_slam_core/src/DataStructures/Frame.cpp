@@ -28,8 +28,58 @@ namespace lsd_slam
 
 int privateFrameAllocCount = 0;
 
+// added: ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Frame::Frame(int id, int width, int height, const Eigen::Matrix3f& K, const Eigen::Matrix3f& rK, double timestamp, const unsigned char* image, const unsigned char* rimage)
+{
+	initialize(id, width, height, K, rK, timestamp);
 
+	data.image[0] = FrameMemory::getInstance().getFloatBuffer(data.width[0]*data.height[0]);
+	float* maxPt = data.image[0] + data.width[0]*data.height[0];
 
+	for(float* pt = data.image[0]; pt < maxPt; pt++)
+	{
+		*pt = *image;
+		image++;
+	}
+
+	// added ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	data.rimage[0] = FrameMemory::getInstance().getFloatBuffer(data.width[0]*data.height[0]);
+		float* rmaxPt = data.rimage[0] + data.width[0]*data.height[0];
+
+		for(float* rpt = data.rimage[0]; rpt < rmaxPt; rpt++)
+		{
+			*rpt = *rimage;
+			rimage++;
+		}
+	// end added ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	data.imageValid[0] = true;
+
+	privateFrameAllocCount++;
+
+	if(enablePrintDebugInfo && printMemoryDebugInfo)
+		printf("ALLOCATED frame %d, now there are %d\n", this->id(), privateFrameAllocCount);
+}
+
+Frame::Frame(int id, int width, int height, const Eigen::Matrix3f& K, const Eigen::Matrix3f& rK, double timestamp, const float* image, const float* rimage)
+{
+	initialize(id, width, height, K, rK, timestamp);
+
+	data.image[0] = FrameMemory::getInstance().getFloatBuffer(data.width[0]*data.height[0]);
+	memcpy(data.image[0], image, data.width[0]*data.height[0] * sizeof(float));
+
+	// added ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	data.rimage[0] = FrameMemory::getInstance().getFloatBuffer(data.width[0]*data.height[0]);
+	memcpy(data.rimage[0], rimage, data.width[0]*data.height[0] * sizeof(float));
+	// end added ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	data.imageValid[0] = true;
+
+	privateFrameAllocCount++;
+
+	if(enablePrintDebugInfo && printMemoryDebugInfo)
+		printf("ALLOCATED frame %d, now there are %d\n", this->id(), privateFrameAllocCount);
+}
+// end added ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
 Frame::Frame(int id, int width, int height, const Eigen::Matrix3f& K, double timestamp, const unsigned char* image)
@@ -316,12 +366,53 @@ void Frame::prepareForStereoWith(Frame* other, Sim3 thisToOther, const Eigen::Ma
 	referenceLevel = level;
 }
 
+//added: ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+void Frame::prepareForStereoWithRightImage( Sim3 thisToOther, const Eigen::Matrix3f& K, const int level)
+{
+	Sim3 otherToThis = thisToOther.inverse();
+
+	//otherToThis = data.worldToCam * other->data.camToWorld;
+	K_otherToThis_R = K * otherToThis.rotationMatrix().cast<float>() * otherToThis.scale();
+	otherToThis_t = otherToThis.translation().cast<float>();
+	K_otherToThis_t = K * otherToThis_t;
+
+
+
+	thisToOther_t = thisToOther.translation().cast<float>();
+	K_thisToOther_t = K * thisToOther_t;
+	thisToOther_R = thisToOther.rotationMatrix().cast<float>() * thisToOther.scale();
+	otherToThis_R_row0 = thisToOther_R.col(0);
+	otherToThis_R_row1 = thisToOther_R.col(1);
+	otherToThis_R_row2 = thisToOther_R.col(2);
+
+	distSquared = otherToThis.translation().dot(otherToThis.translation());
+
+	referenceID = this->id();
+	referenceLevel = level;
+}
+
+// end added
+
 void Frame::require(int dataFlags, int level)
 {
 	if ((dataFlags & IMAGE) && ! data.imageValid[level])
 	{
 		buildImage(level);
 	}
+	//added: ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~`
+	if ((dataFlags & RIMAGE) && ! data.rimageValid[level])
+		{
+			buildRImage(level);
+		}
+	if ((dataFlags & RGRADIENTS) && ! data.rgradientsValid[level])
+		{
+			buildGradientsR(level);
+		}
+	if ((dataFlags & RMAX_GRADIENTS) && ! data.rmaxGradientsValid[level])
+		{
+			buildMaxGradientsR(level);
+		}
+	//end added
 	if ((dataFlags & GRADIENTS) && ! data.gradientsValid[level])
 	{
 		buildGradients(level);
@@ -382,7 +473,7 @@ bool Frame::minimizeInMemory()
 		if(enablePrintDebugInfo && printMemoryDebugInfo)
 			printf("minimizing frame %d\n",id());
 
-		release(IMAGE | IDEPTH | IDEPTH_VAR, true, false);
+		release(IMAGE | IDEPTH | IDEPTH_VAR | RIMAGE, true, false); //added: RIMAGE
 		release(GRADIENTS | MAX_GRADIENTS, false, false);
 
 		clear_refPixelWasGood();
@@ -394,7 +485,8 @@ bool Frame::minimizeInMemory()
 	return false;
 }
 
-void Frame::initialize(int id, int width, int height, const Eigen::Matrix3f& K, double timestamp)
+// added ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+void Frame::initialize(int id, int width, int height, const Eigen::Matrix3f& K, const Eigen::Matrix3f& rK, double timestamp) // added: second K setup
 {
 	data.id = id;
 	
@@ -412,6 +504,20 @@ void Frame::initialize(int id, int width, int height, const Eigen::Matrix3f& K, 
 	data.cxInv[0] = data.KInv[0](0,2);
 	data.cyInv[0] = data.KInv[0](1,2);
 	
+	// added: ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	data.rK[0] = rK;
+	data.rfx[0] = rK(0,0);
+	data.rfy[0] = rK(1,1);
+	data.rcx[0] = rK(0,2);
+	data.rcy[0] = rK(1,2);
+
+	data.rKInv[0] = rK.inverse();
+	data.rfxInv[0] = data.rKInv[0](0,0);
+	data.rfyInv[0] = data.rKInv[0](1,1);
+	data.rcxInv[0] = data.rKInv[0](0,2);
+	data.rcyInv[0] = data.rKInv[0](1,2);
+	// end added: ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 	data.timestamp = timestamp;
 
 	data.hasIDepthBeenSet = false;
@@ -439,9 +545,121 @@ void Frame::initialize(int id, int width, int height, const Eigen::Matrix3f& K, 
 		data.idepth[level] = 0;
 		data.idepthVar[level] = 0;
 		data.reActivationDataValid = false;
+		// added: ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+		data.rimage[level] = 0;
+		// end added: ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 
 // 		data.refIDValid[level] = false;
 		
+		if (level > 0)
+		{
+			data.fx[level] = data.fx[level-1] * 0.5;
+			data.fy[level] = data.fy[level-1] * 0.5;
+			data.cx[level] = (data.cx[0] + 0.5) / ((int)1<<level) - 0.5;
+			data.cy[level] = (data.cy[0] + 0.5) / ((int)1<<level) - 0.5;
+
+			data.K[level]  << data.fx[level], 0.0, data.cx[level], 0.0, data.fy[level], data.cy[level], 0.0, 0.0, 1.0;	// synthetic
+			data.KInv[level] = (data.K[level]).inverse();
+
+			data.fxInv[level] = data.KInv[level](0,0);
+			data.fyInv[level] = data.KInv[level](1,1);
+			data.cxInv[level] = data.KInv[level](0,2);
+			data.cyInv[level] = data.KInv[level](1,2);
+
+			// added: ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+			data.rfx[level] = data.rfx[level-1] * 0.5;
+			data.rfy[level] = data.rfy[level-1] * 0.5;
+			data.rcx[level] = (data.rcx[0] + 0.5) / ((int)1<<level) - 0.5;
+			data.rcy[level] = (data.rcy[0] + 0.5) / ((int)1<<level) - 0.5;
+
+			data.rK[level]  << data.rfx[level], 0.0, data.rcx[level], 0.0, data.rfy[level], data.rcy[level], 0.0, 0.0, 1.0;	// synthetic
+			data.rKInv[level] = (data.rK[level]).inverse();
+
+			data.rfxInv[level] = data.rKInv[level](0,0);
+			data.rfyInv[level] = data.rKInv[level](1,1);
+			data.rcxInv[level] = data.rKInv[level](0,2);
+			data.rcyInv[level] = data.rKInv[level](1,2);
+			// end added: ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+		}
+	}
+
+	data.validity_reAct = 0;
+	data.idepthVar_reAct = 0;
+	data.idepth_reAct = 0;
+
+	data.refPixelWasGood = 0;
+
+	permaRefNumPts = 0;
+	permaRef_colorAndVarData = 0;
+	permaRef_posData = 0;
+
+	meanIdepth = 1;
+	numPoints = 0;
+
+	numFramesTrackedOnThis = numMappedOnThis = numMappedOnThisTotal = 0;
+
+	idxInKeyframes = -1;
+
+	edgeErrorSum = edgesNum = 1;
+
+	lastConstraintTrackedCamToWorld = Sim3();
+
+	isActive = false;
+}
+// added ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
+void Frame::initialize(int id, int width, int height, const Eigen::Matrix3f& K, double timestamp)
+{
+	data.id = id;
+
+	pose = new FramePoseStruct(this);
+
+	data.K[0] = K;
+	data.fx[0] = K(0,0);
+	data.fy[0] = K(1,1);
+	data.cx[0] = K(0,2);
+	data.cy[0] = K(1,2);
+
+	data.KInv[0] = K.inverse();
+	data.fxInv[0] = data.KInv[0](0,0);
+	data.fyInv[0] = data.KInv[0](1,1);
+	data.cxInv[0] = data.KInv[0](0,2);
+	data.cyInv[0] = data.KInv[0](1,2);
+
+
+	data.timestamp = timestamp;
+
+	data.hasIDepthBeenSet = false;
+	depthHasBeenUpdatedFlag = false;
+
+	referenceID = -1;
+	referenceLevel = -1;
+
+	numMappablePixels = -1;
+
+	for (int level = 0; level < PYRAMID_LEVELS; ++ level)
+	{
+		data.width[level] = width >> level;
+		data.height[level] = height >> level;
+
+		data.imageValid[level] = false;
+		data.gradientsValid[level] = false;
+		data.maxGradientsValid[level] = false;
+		data.idepthValid[level] = false;
+		data.idepthVarValid[level] = false;
+
+		data.image[level] = 0;
+		data.gradients[level] = 0;
+		data.maxGradients[level] = 0;
+		data.idepth[level] = 0;
+		data.idepthVar[level] = 0;
+		data.reActivationDataValid = false;
+
+// 		data.refIDValid[level] = false;
+
 		if (level > 0)
 		{
 			data.fx[level] = data.fx[level-1] * 0.5;
@@ -482,6 +700,7 @@ void Frame::initialize(int id, int width, int height, const Eigen::Matrix3f& K, 
 
 	isActive = false;
 }
+
 
 void Frame::setDepth_Allocate()
 {
@@ -629,6 +848,161 @@ void Frame::buildImage(int level)
 	data.imageValid[level] = true;
 }
 
+// added: ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+void Frame::buildRImage(int level)
+{
+	if (level == 0)
+	{
+		printf("Frame::buildImage(0): Loading image from disk is not implemented yet! No-op.\n");
+		return;
+	}
+
+	require(RIMAGE, level - 1);
+	boost::unique_lock<boost::mutex> lock2(buildMutex);
+
+	if(data.imageValid[level])
+		return;
+
+	if(enablePrintDebugInfo && printFrameBuildDebugInfo)
+		printf("CREATE Image lvl %d for frame %d\n", level, id());
+
+	int width = data.width[level - 1];
+	int height = data.height[level - 1];
+	const float* source = data.rimage[level - 1];
+
+	if (data.rimage[level] == 0)
+		data.rimage[level] = FrameMemory::getInstance().getFloatBuffer(data.width[level] * data.height[level]);
+	float* dest = data.rimage[level];
+
+#if defined(ENABLE_SSE)
+	// I assume all all subsampled width's are a multiple of 8.
+	// if this is not the case, this still works except for the last * pixel, which will produce a segfault.
+	// in that case, reduce this loop and calculate the last 0-3 dest pixels by hand....
+	if (width % 8 == 0)
+	{
+		__m128 p025 = _mm_setr_ps(0.25f,0.25f,0.25f,0.25f);
+
+		const float* maxY = source+width*height;
+		for(const float* y = source; y < maxY; y+=width*2)
+		{
+			const float* maxX = y+width;
+			for(const float* x=y; x < maxX; x += 8)
+			{
+				// i am calculating four dest pixels at a time.
+
+				__m128 top_left = _mm_load_ps((float*)x);
+				__m128 bot_left = _mm_load_ps((float*)x+width);
+				__m128 left = _mm_add_ps(top_left,bot_left);
+
+				__m128 top_right = _mm_load_ps((float*)x+4);
+				__m128 bot_right = _mm_load_ps((float*)x+width+4);
+				__m128 right = _mm_add_ps(top_right,bot_right);
+
+				__m128 sumA = _mm_shuffle_ps(left,right, _MM_SHUFFLE(2,0,2,0));
+				__m128 sumB = _mm_shuffle_ps(left,right, _MM_SHUFFLE(3,1,3,1));
+
+				__m128 sum = _mm_add_ps(sumA,sumB);
+				sum = _mm_mul_ps(sum,p025);
+
+				_mm_store_ps(dest, sum);
+				dest += 4;
+			}
+		}
+
+		data.imageValid[level] = true;
+		return;
+	}
+#elif defined(ENABLE_NEON)
+	// I assume all all subsampled width's are a multiple of 8.
+	// if this is not the case, this still works except for the last * pixel, which will produce a segfault.
+	// in that case, reduce this loop and calculate the last 0-3 dest pixels by hand....
+	if (width % 8 == 0)
+	{
+		static const float p025[] = {0.25, 0.25, 0.25, 0.25};
+		int width_iteration_count = width / 8;
+		int height_iteration_count = height / 2;
+		const float* cur_px = source;
+		const float* next_row_px = source + width;
+
+		__asm__ __volatile__
+		(
+			"vldmia %[p025], {q10}                        \n\t" // p025(q10)
+
+			".height_loop:                                \n\t"
+
+				"mov r5, %[width_iteration_count]             \n\t" // store width_iteration_count
+				".width_loop:                                 \n\t"
+
+					"vldmia   %[cur_px]!, {q0-q1}             \n\t" // top_left(q0), top_right(q1)
+					"vldmia   %[next_row_px]!, {q2-q3}        \n\t" // bottom_left(q2), bottom_right(q3)
+
+					"vadd.f32 q0, q0, q2                      \n\t" // left(q0)
+					"vadd.f32 q1, q1, q3                      \n\t" // right(q1)
+
+					"vpadd.f32 d0, d0, d1                     \n\t" // pairwise add into sum(q0)
+					"vpadd.f32 d1, d2, d3                     \n\t"
+					"vmul.f32 q0, q0, q10                     \n\t" // multiply with 0.25 to get average
+
+					"vstmia %[dest]!, {q0}                    \n\t"
+
+				"subs     %[width_iteration_count], %[width_iteration_count], #1 \n\t"
+				"bne      .width_loop                     \n\t"
+				"mov      %[width_iteration_count], r5    \n\t" // restore width_iteration_count
+
+				// Advance one more line
+				"add      %[cur_px], %[cur_px], %[rowSize]    \n\t"
+				"add      %[next_row_px], %[next_row_px], %[rowSize] \n\t"
+
+			"subs     %[height_iteration_count], %[height_iteration_count], #1 \n\t"
+			"bne      .height_loop                       \n\t"
+
+			: /* outputs */ [cur_px]"+&r"(cur_px),
+							[next_row_px]"+&r"(next_row_px),
+							[width_iteration_count]"+&r"(width_iteration_count),
+							[height_iteration_count]"+&r"(height_iteration_count),
+							[dest]"+&r"(dest)
+			: /* inputs  */ [p025]"r"(p025),
+							[rowSize]"r"(width * sizeof(float))
+			: /* clobber */ "memory", "cc", "r5",
+							"q0", "q1", "q2", "q3", "q10"
+		);
+
+		data.imageValid[level] = true;
+		return;
+	}
+#endif
+
+	int wh = width*height;
+	const float* s;
+	for(int y=0;y<wh;y+=width*2)
+	{
+		for(int x=0;x<width;x+=2)
+		{
+			s = source + x + y;
+			*dest = (s[0] +
+					s[1] +
+					s[width] +
+					s[1+width]) * 0.25f;
+			dest++;
+		}
+	}
+
+	data.imageValid[level] = true;
+}
+
+void Frame::releaseRImage(int level)
+{
+	if (level == 0)
+	{
+		printf("Frame::releaseImage(0): Storing image on disk is not supported yet! No-op.\n");
+		return;
+	}
+	FrameMemory::getInstance().returnBuffer(data.rimage[level]);
+	data.rimage[level] = 0;
+}
+
+// end added
+
 void Frame::releaseImage(int level)
 {
 	if (level == 0)
@@ -678,6 +1052,138 @@ void Frame::buildGradients(int level)
 
 	data.gradientsValid[level] = true;
 }
+
+//added: ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+void Frame::buildGradientsR(int level)
+{
+	require(RIMAGE, level);
+	boost::unique_lock<boost::mutex> lock2(buildMutex);
+
+	if(data.rgradientsValid[level])
+		return;
+
+	if(enablePrintDebugInfo && printFrameBuildDebugInfo)
+		printf("CREATE Gradients lvl %d for frame %d\n", level, id());
+
+	int width = data.width[level];
+	int height = data.height[level];
+	if(data.rgradients[level] == 0)
+		data.rgradients[level] = (Eigen::Vector4f*)FrameMemory::getInstance().getBuffer(sizeof(Eigen::Vector4f) * width * height);
+	const float* img_pt = data.rimage[level] + width;
+	const float* img_pt_max = data.rimage[level] + width*(height-1);
+	Eigen::Vector4f* gradxyii_pt = data.rgradients[level] + width;
+
+	// in each iteration i need -1,0,p1,mw,pw
+	float val_m1 = *(img_pt-1);
+	float val_00 = *img_pt;
+	float val_p1;
+
+	for(; img_pt < img_pt_max; img_pt++, gradxyii_pt++)
+	{
+		val_p1 = *(img_pt+1);
+
+		*((float*)gradxyii_pt) = 0.5f*(val_p1 - val_m1);
+		*(((float*)gradxyii_pt)+1) = 0.5f*(*(img_pt+width) - *(img_pt-width));
+		*(((float*)gradxyii_pt)+2) = val_00;
+
+		val_m1 = val_00;
+		val_00 = val_p1;
+	}
+
+	data.rgradientsValid[level] = true;
+}
+
+void Frame::releaseGradientsR(int level)
+{
+	FrameMemory::getInstance().returnBuffer(reinterpret_cast<float*>(data.rgradients[level]));
+	data.rgradients[level] = 0;
+}
+
+void Frame::buildMaxGradientsR(int level)
+{
+	require(RGRADIENTS, level);
+	boost::unique_lock<boost::mutex> lock2(buildMutex);
+
+	if(data.rmaxGradientsValid[level]) return;
+
+	if(enablePrintDebugInfo && printFrameBuildDebugInfo)
+		printf("CREATE AbsGrad lvl %d for frame %d\n", level, id());
+
+	int width = data.width[level];
+	int height = data.height[level];
+	if (data.rmaxGradients[level] == 0)
+		data.rmaxGradients[level] = FrameMemory::getInstance().getFloatBuffer(width * height);
+
+	float* maxGradTemp = FrameMemory::getInstance().getFloatBuffer(width * height);
+
+
+	// 1. write abs gradients in real data.
+	Eigen::Vector4f* gradxyii_pt = data.rgradients[level] + width;
+	float* maxgrad_pt = data.rmaxGradients[level] + width;
+	float* maxgrad_pt_max = data.rmaxGradients[level] + width*(height-1);
+
+	for(; maxgrad_pt < maxgrad_pt_max; maxgrad_pt++, gradxyii_pt++)
+	{
+		float dx = *((float*)gradxyii_pt);
+		float dy = *(1+(float*)gradxyii_pt);
+		*maxgrad_pt = sqrtf(dx*dx + dy*dy);
+	}
+
+	// 2. smear up/down direction into temp buffer
+	maxgrad_pt = data.rmaxGradients[level] + width+1;
+	maxgrad_pt_max = data.rmaxGradients[level] + width*(height-1)-1;
+	float* maxgrad_t_pt = maxGradTemp + width+1;
+	for(;maxgrad_pt<maxgrad_pt_max; maxgrad_pt++, maxgrad_t_pt++)
+	{
+		float g1 = maxgrad_pt[-width];
+		float g2 = maxgrad_pt[0];
+		if(g1 < g2) g1 = g2;
+		float g3 = maxgrad_pt[width];
+		if(g1 < g3)
+			*maxgrad_t_pt = g3;
+		else
+			*maxgrad_t_pt = g1;
+	}
+
+	float numMappablePixels = 0;
+	// 2. smear left/right direction into real data
+	maxgrad_pt = data.rmaxGradients[level] + width+1;
+	maxgrad_pt_max = data.rmaxGradients[level] + width*(height-1)-1;
+	maxgrad_t_pt = maxGradTemp + width+1;
+	for(;maxgrad_pt<maxgrad_pt_max; maxgrad_pt++, maxgrad_t_pt++)
+	{
+		float g1 = maxgrad_t_pt[-1];
+		float g2 = maxgrad_t_pt[0];
+		if(g1 < g2) g1 = g2;
+		float g3 = maxgrad_t_pt[1];
+		if(g1 < g3)
+		{
+			*maxgrad_pt = g3;
+			if(g3 >= MIN_ABS_GRAD_CREATE)
+				numMappablePixels++;
+		}
+		else
+		{
+			*maxgrad_pt = g1;
+			if(g1 >= MIN_ABS_GRAD_CREATE)
+				numMappablePixels++;
+		}
+	}
+
+	if(level==0)
+		this->rnumMappablePixels = numMappablePixels;
+
+	FrameMemory::getInstance().returnBuffer(maxGradTemp);
+
+	data.rmaxGradientsValid[level] = true;
+}
+
+void Frame::releaseMaxGradientsR(int level)
+{
+	FrameMemory::getInstance().returnBuffer(data.rmaxGradients[level]);
+	data.rmaxGradients[level] = 0;
+}
+// end:added
 
 void Frame::releaseGradients(int level)
 {

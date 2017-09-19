@@ -63,17 +63,22 @@ public:
 	int width;
 	int height;
 	Eigen::Matrix3f K;
+	Eigen::Matrix3f rK;
 	const bool SLAMEnabled;
 
 	bool trackingIsGood;
 
-
+	SlamSystem(int w, int h, Eigen::Matrix3f K, Eigen::Matrix3f rK, bool enableSLAM = true);
 	SlamSystem(int w, int h, Eigen::Matrix3f K, bool enableSLAM = true);
 	SlamSystem(const SlamSystem&) = delete;
 	SlamSystem& operator=(const SlamSystem&) = delete;
 	~SlamSystem();
 
 	void randomInit(uchar* image, double timeStamp, int id);
+	//added:
+	void SlamSystem::StereoInit(uchar* image, double timeStamp, int id, uchar* rimage );
+	//end added:
+
 	void gtDepthInit(uchar* image, float* depth, double timeStamp, int id);
 
 	

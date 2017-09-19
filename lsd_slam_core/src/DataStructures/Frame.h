@@ -44,6 +44,10 @@ public:
 	EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 	friend class FrameMemory;
 
+	// added: ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	Frame(int id, int width, int height, const Eigen::Matrix3f& K, const Eigen::Matrix3f& rK, double timestamp, const unsigned char* image, const unsigned char* rimage);
+	Frame(int id, int width, int height, const Eigen::Matrix3f& K, const Eigen::Matrix3f& rK, double timestamp, const float* image, const float* rimage);
+	//end added
 
 	Frame(int id, int width, int height, const Eigen::Matrix3f& K, double timestamp, const unsigned char* image);
 
@@ -52,7 +56,7 @@ public:
 	~Frame();
 	
 	
-	/** Sets or updates idepth and idepthVar on level zero. Invalidates higher levels. */
+	/** Sets or updates idepth and idepthVar on level zero higher levels. */
 	void setDepth(const DepthMapPixelHypothesis* newDepth);
 
 	/** Calculates mean information for statistical purposes. */
@@ -63,6 +67,10 @@ public:
 	
 	/** Prepares this frame for stereo comparisons with the other frame (computes some intermediate values that will be needed) */
 	void prepareForStereoWith(Frame* other, Sim3 thisToOther, const Eigen::Matrix3f& K, const int level);
+
+	//added ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	void prepareForStereoWithRightImage( Sim3 thisToOther, const Eigen::Matrix3f& K, const int level);
+	// end added
 
 	
 
@@ -100,7 +108,16 @@ public:
 	inline double timestamp() const;
 	
 	inline float* image(int level = 0);
+	// added: ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	inline const Eigen::Matrix3f& rK(int level = 0) const;
+	inline float* rimage(int level =0);
+	inline const Eigen::Vector4f* rgradients(int level = 0);
+	inline const float* rmaxGradients(int level = 0);
+	// end added
+
+
 	inline const Eigen::Vector4f* gradients(int level = 0);
+
 	inline const float* maxGradients(int level = 0);
 	inline bool hasIDepthBeenSet() const;
 	inline const float* idepth(int level = 0);
@@ -123,8 +140,11 @@ public:
 		IDEPTH			= 1<<3,
 		IDEPTH_VAR		= 1<<4,
 		REF_ID			= 1<<5,
+		RIMAGE 			= 1<<6, // added RIMAGE
+		RGRADIENTS		= 1<<7, // added RGRADIENTS
+		RMAX_GRADIENTS  = 1<<8, // added RMAX_GRADIENTS
 		
-		ALL = IMAGE | GRADIENTS | MAX_GRADIENTS | IDEPTH | IDEPTH_VAR | REF_ID
+		ALL = IMAGE | GRADIENTS | MAX_GRADIENTS | IDEPTH | IDEPTH_VAR | REF_ID | RIMAGE | RGRADIENTS | RMAX_GRADIENTS // added RIMAGE
 	};
 	
 
@@ -203,12 +223,16 @@ public:
 	int idxInKeyframes;
 	float edgeErrorSum, edgesNum;
 	int numMappablePixels;
+	int rnumMappablePixels; // added
 	float meanInformation;
 
 private:
 
 	void require(int dataFlags, int level = 0);
 	void release(int dataFlags, bool pyramidsOnly, bool invalidateOnly);
+// added ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	void initialize(int id, int width, int height, const Eigen::Matrix3f& K, const Eigen::Matrix3f& rK, double timestamp); //added take second K
+// end added
 
 	void initialize(int id, int width, int height, const Eigen::Matrix3f& K, double timestamp);
 	void setDepth_Allocate();
@@ -219,6 +243,15 @@ private:
 	void buildGradients(int level);
 	void releaseGradients(int level);
 	
+	//added: ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	void buildRImage(int level);
+	void releaseRImage(int level);
+	void buildGradientsR(int level);
+	void releaseGradientsR(int level);
+	void buildMaxGradientsR(int level);
+	void releaseMaxGradientsR(int level);
+	// end added
+
 	void buildMaxGradients(int level);
 	void releaseMaxGradients(int level);
 	
@@ -241,6 +274,7 @@ private:
 		double timestamp;
 
 		
+
 		float* image[PYRAMID_LEVELS];
 		bool imageValid[PYRAMID_LEVELS];
 		
@@ -250,6 +284,7 @@ private:
 		float* maxGradients[PYRAMID_LEVELS];
 		bool maxGradientsValid[PYRAMID_LEVELS];
 		
+
 
 		bool hasIDepthBeenSet;
 
@@ -273,6 +308,19 @@ private:
 		// data from initial tracking, indicating which pixels in the reference frame ware good or not.
 		// deleted as soon as frame is used for mapping.
 		bool* refPixelWasGood;
+
+		// added: ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+		float* rimage[PYRAMID_LEVELS];
+		bool rimageValid[PYRAMID_LEVELS];
+		float rfx[PYRAMID_LEVELS], rfy[PYRAMID_LEVELS], rcx[PYRAMID_LEVELS], rcy[PYRAMID_LEVELS];
+		float rfxInv[PYRAMID_LEVELS], rfyInv[PYRAMID_LEVELS], rcxInv[PYRAMID_LEVELS], rcyInv[PYRAMID_LEVELS];
+		Eigen::Matrix3f rK[PYRAMID_LEVELS], rKInv[PYRAMID_LEVELS];
+		Eigen::Vector4f* rgradients[PYRAMID_LEVELS];
+		bool rgradientsValid[PYRAMID_LEVELS];
+
+		float* rmaxGradients[PYRAMID_LEVELS];
+		bool rmaxGradientsValid[PYRAMID_LEVELS];
+		// end added
 	};
 	Data data;
 
@@ -360,6 +408,35 @@ inline float* Frame::image(int level)
 		require(IMAGE, level);
 	return data.image[level];
 }
+// added: ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+inline float* Frame::rimage(int level)
+{
+	if (! data.imageValid[level])
+		require(RIMAGE, level);
+	return data.rimage[level];
+}
+
+inline const Eigen::Vector4f* Frame::rgradients(int level)
+{
+	if (! data.rgradientsValid[level])
+		require(RGRADIENTS, level);
+	return data.rgradients[level];
+}
+inline const float* Frame::rmaxGradients(int level)
+{
+	if (! data.rmaxGradientsValid[level])
+		require(RMAX_GRADIENTS, level);
+	return data.rmaxGradients[level];
+}
+
+inline const Eigen::Matrix3f& Frame::rK(int level) const
+{
+	return data.rK[level];
+}
+
+// end added
+
+
 inline const Eigen::Vector4f* Frame::gradients(int level)
 {
 	if (! data.gradientsValid[level])

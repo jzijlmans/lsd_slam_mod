@@ -80,6 +80,9 @@ public:
 
 	void initializeFromGTDepth(Frame* new_frame);
 	void initializeRandomly(Frame* new_frame);
+	//added:
+	void initializeStereo(Frame* new_frame);
+	//end added
 
 	void setFromExistingKF(Frame* kf);
 
@@ -135,6 +138,14 @@ private:
 			const Frame* const referenceFrame, const float* referenceFrameImage,
 			float &result_idepth, float &result_var, float &result_eplLength,
 			RunningStats* const stats);
+
+	//added:
+	inline float doStereoLineStereo(
+		const float u, const float v, const float epxn, const float epyn,
+		const float min_idepth, const float prior_idepth, float max_idepth,
+		float &result_idepth, float &result_var, float &result_eplLength);
+	bool observeDepthStereo(const int &x, const int &y, const int &idx, RunningStats* const &stats);
+	//end added
 
 
 	void propagateDepth(Frame* new_keyframe);

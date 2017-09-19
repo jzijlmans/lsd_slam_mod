@@ -48,6 +48,84 @@
 
 using namespace lsd_slam;
 
+//added: stereo initialization:
+SlamSystem::SlamSystem(int w, int h, Eigen::Matrix3f K, Eigen::Matrix3f rK, bool enableSLAM)
+: SLAMEnabled(enableSLAM), relocalizer(w,h,K)
+{
+	if(w%16 != 0 || h%16!=0)
+	{
+		printf("image dimensions must be multiples of 16! Please crop your images / video accordingly.\n");
+		assert(false);
+	}
+
+	this->width = w;
+	this->height = h;
+	this->K = K;
+	this->rK = rK; //added
+	trackingIsGood = true;
+
+
+	currentKeyFrame =  nullptr;
+	trackingReferenceFrameSharedPT = nullptr;
+	keyFrameGraph = new KeyFrameGraph();
+	createNewKeyFrame = false;
+
+	map =  new DepthMap(w,h,K);
+
+	newConstraintAdded = false;
+	haveUnmergedOptimizationOffset = false;
+
+
+	tracker = new SE3Tracker(w,h,K);
+	// Do not use more than 4 levels for odometry tracking
+	for (int level = 4; level < PYRAMID_LEVELS; ++level)
+		tracker->settings.maxItsPerLvl[level] = 0;
+	trackingReference = new TrackingReference();
+	mappingTrackingReference = new TrackingReference();
+
+
+	if(SLAMEnabled)
+	{
+		trackableKeyFrameSearch = new TrackableKeyFrameSearch(keyFrameGraph,w,h,K);
+		constraintTracker = new Sim3Tracker(w,h,K);
+		constraintSE3Tracker = new SE3Tracker(w,h,K);
+		newKFTrackingReference = new TrackingReference();
+		candidateTrackingReference = new TrackingReference();
+	}
+	else
+	{
+		constraintSE3Tracker = 0;
+		trackableKeyFrameSearch = 0;
+		constraintTracker = 0;
+		newKFTrackingReference = 0;
+		candidateTrackingReference = 0;
+	}
+
+
+	outputWrapper = 0;
+
+	keepRunning = true;
+	doFinalOptimization = false;
+	depthMapScreenshotFlag = false;
+	lastTrackingClosenessScore = 0;
+
+	thread_mapping = boost::thread(&SlamSystem::mappingThreadLoop, this);
+
+	if(SLAMEnabled)
+	{
+		thread_constraint_search = boost::thread(&SlamSystem::constraintSearchThreadLoop, this);
+		thread_optimization = boost::thread(&SlamSystem::optimizationThreadLoop, this);
+	}
+
+
+
+	msTrackFrame = msOptimizationIteration = msFindConstraintsItaration = msFindReferences = 0;
+	nTrackFrame = nOptimizationIteration = nFindConstraintsItaration = nFindReferences = 0;
+	nAvgTrackFrame = nAvgOptimizationIteration = nAvgFindConstraintsItaration = nAvgFindReferences = 0;
+	gettimeofday(&lastHzUpdate, NULL);
+
+}
+//end added
 
 SlamSystem::SlamSystem(int w, int h, Eigen::Matrix3f K, bool enableSLAM)
 : SLAMEnabled(enableSLAM), relocalizer(w,h,K)
@@ -853,7 +931,40 @@ void SlamSystem::gtDepthInit(uchar* image, float* depth, double timeStamp, int i
 	printf("Done GT initialization!\n");
 }
 
+//added:
+void SlamSystem::StereoInit(uchar* image, double timeStamp, int id, uchar* rimage )
+{
+	printf("Doing stereo  initialization!\n");
 
+	if(!doMapping)
+		printf("WARNING: mapping is disabled, but we just initialized... THIS WILL NOT WORK! Set doMapping to true.\n");
+
+
+	currentKeyFrameMutex.lock();
+
+	currentKeyFrame.reset(new Frame(id, width, height, K, rK, timeStamp, image, rimage));
+	map->initializeStereo(currentKeyFrame.get()); //added: changed from randomInit
+	keyFrameGraph->addFrame(currentKeyFrame.get());
+
+	currentKeyFrameMutex.unlock();
+
+	if(doSlam)
+	{
+		keyFrameGraph->idToKeyFrameMutex.lock();
+		keyFrameGraph->idToKeyFrame.insert(std::make_pair(currentKeyFrame->id(), currentKeyFrame));
+		keyFrameGraph->idToKeyFrameMutex.unlock();
+	}
+	if(continuousPCOutput && outputWrapper != 0) outputWrapper->publishKeyframe(currentKeyFrame.get());
+
+
+	if (displayDepthMap || depthMapScreenshotFlag)
+		debugDisplayDepthMap();
+
+
+	printf("Done Random initialization!\n");
+
+}
+//end added
 void SlamSystem::randomInit(uchar* image, double timeStamp, int id)
 {
 	printf("Doing Random initialization!\n");

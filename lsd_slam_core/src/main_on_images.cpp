@@ -155,6 +155,9 @@ int main( int argc, char** argv )
 		exit(0);
 	}
 
+
+
+
 	int w = undistorter->getOutputWidth();
 	int h = undistorter->getOutputHeight();
 
@@ -168,13 +171,74 @@ int main( int argc, char** argv )
 	Sophus::Matrix3f K;
 	K << fx, 0.0, cx, 0.0, fy, cy, 0.0, 0.0, 1.0;
 
+	// added: get the right calibration file and right image files
+	std::string rcalibFile;
+	Undistorter* rundistorter = 0;
+	bool stereo = false;
+	std::string rsource;
+	std::vector<std::string> rfiles;
+	int rw ;
+	int rh ;
+	int rw_inp ;
+	int rh_inp ;
+	float rfx ;
+	float rfy ;
+	float rcx ;
+	float rcy ;
+	Sophus::Matrix3f rK;
+
+	if(ros::param::get("~rcalib", rcalibFile) && ros::param::get("~rfiles", rsource))
+	{
+		stereo = true;
+		rundistorter = Undistorter::getUndistorterForFile(rcalibFile.c_str());
+		ros::param::del("~rcalib");
+
+		ros::param::del("~files");
+
+
+		if(getdir(rsource, rfiles) >= 0)
+		{
+			printf("found %d right image files in folder %s!\n", (int)rfiles.size(), rsource.c_str());
+		}
+		else if(getFile(rsource, rfiles) >= 0)
+		{
+			printf("found %d right image files in file %s!\n", (int)rfiles.size(), rsource.c_str());
+		}
+		else
+		{
+			printf("could not load right file list! wrong path / file?\n");
+		}
+
+		rw = rundistorter->getOutputWidth();
+		rh = rundistorter->getOutputHeight();
+		rw_inp = rundistorter->getInputWidth();
+		rh_inp = rundistorter->getInputHeight();
+		rfx = rundistorter->getK().at<double>(0, 0);
+		rfy = rundistorter->getK().at<double>(1, 1);
+		rcx = rundistorter->getK().at<double>(2, 0);
+		rcy = rundistorter->getK().at<double>(2, 1);
+
+		rK << rfx, 0.0, rcx, 0.0, rfy, rcy, 0.0, 0.0, 1.0;
+
+	}
+	else{
+		printf("no right camera calibration file or right image files (set using _rcalib:=FILE and _rfiles:=DIR)\n so no stereo preformed");
+
+	}
+	// end added
+
 
 	// make output wrapper. just set to zero if no output is required.
 	Output3DWrapper* outputWrapper = new ROSOutput3DWrapper(w,h);
 
 
 	// make slam system
-	SlamSystem* system = new SlamSystem(w, h, K, doSlam);
+	if (!stereo){
+		SlamSystem* system = new SlamSystem(w, h, K, doSlam);
+	}
+	else{
+		SlamSystem* system = new SlamSystem(w, h, K, rK, doSlam);
+	}
 	system->setVisualization(outputWrapper);
 
 
@@ -214,58 +278,134 @@ int main( int argc, char** argv )
 
 
 	cv::Mat image = cv::Mat(h,w,CV_8U);
+	cv::Mat rimage = cv::Mat(rh,rw,CV_8U);
 	int runningIDX=0;
 	float fakeTimeStamp = 0;
 
 	ros::Rate r(hz);
-
-	for(unsigned int i=0;i<files.size();i++)
-	{
-		cv::Mat imageDist = cv::imread(files[i], CV_LOAD_IMAGE_GRAYSCALE);
-
-		if(imageDist.rows != h_inp || imageDist.cols != w_inp)
+//added
+	if (stereo){
+		for(unsigned int i=0;i<files.size();i++)
 		{
-			if(imageDist.rows * imageDist.cols == 0)
-				printf("failed to load image %s! skipping.\n", files[i].c_str());
+			cv::Mat imageDist = cv::imread(files[i], CV_LOAD_IMAGE_GRAYSCALE);
+			cv::Mat rimageDist = cv::imread(rfiles[i], CV_LOAD_IMAGE_GRAYSCALE);
+
+			if(imageDist.rows != h_inp || imageDist.cols != w_inp)
+			{
+				if(imageDist.rows * imageDist.cols == 0)
+					printf("failed to load image %s! skipping.\n", files[i].c_str());
+				else
+					printf("image %s has wrong dimensions - expecting %d x %d, found %d x %d. Skipping.\n",
+							files[i].c_str(),
+							w,h,imageDist.cols, imageDist.rows);
+				continue;
+			}
+
+			if(rimageDist.rows != h_inp || rimageDist.cols != w_inp)
+			{
+				if(rimageDist.rows * rimageDist.cols == 0)
+					printf("failed to load right image %s! skipping.\n", rfiles[i].c_str());
+				else
+					printf("right image %s has wrong dimensions - expecting %d x %d, found %d x %d. Skipping.\n",
+							rfiles[i].c_str(),
+							rw,rh,rimageDist.cols, rimageDist.rows);
+				continue;
+			}
+
+			assert(imageDist.type() == CV_8U);
+			assert(rimageDist.type() == CV_8U);
+
+			undistorter->undistort(imageDist, image);
+			assert(image.type() == CV_8U);
+
+			rundistorter->undistort(rimageDist, rimage);
+			assert(rimage.type() == CV_8U);
+
+
+			if(runningIDX == 0)
+					system->randomInit(image.data, fakeTimeStamp, runningIDX, rimage.data);
 			else
-				printf("image %s has wrong dimensions - expecting %d x %d, found %d x %d. Skipping.\n",
-						files[i].c_str(),
-						w,h,imageDist.cols, imageDist.rows);
-			continue;
+					system->trackFrame(image.data, runningIDX ,hz == 0,fakeTimeStamp, rimage.data);
+
+
+			runningIDX++;
+			fakeTimeStamp+=0.03;
+
+			if(hz != 0)
+				r.sleep();
+
+			if(fullResetRequested)
+			{
+
+				printf("FULL RESET!\n");
+				delete system;
+
+				system = new SlamSystem(w, h, K, rK, doSlam);
+				system->setVisualization(outputWrapper);
+
+				fullResetRequested = false;
+				runningIDX = 0;
+			}
+
+			ros::spinOnce();
+
+			if(!ros::ok())
+				break;
 		}
-		assert(imageDist.type() == CV_8U);
-
-		undistorter->undistort(imageDist, image);
-		assert(image.type() == CV_8U);
-
-		if(runningIDX == 0)
-			system->randomInit(image.data, fakeTimeStamp, runningIDX);
-		else
-			system->trackFrame(image.data, runningIDX ,hz == 0,fakeTimeStamp);
-		runningIDX++;
-		fakeTimeStamp+=0.03;
-
-		if(hz != 0)
-			r.sleep();
-
-		if(fullResetRequested)
-		{
-
-			printf("FULL RESET!\n");
-			delete system;
-
-			system = new SlamSystem(w, h, K, doSlam);
-			system->setVisualization(outputWrapper);
-
-			fullResetRequested = false;
-			runningIDX = 0;
-		}
-
-		ros::spinOnce();
-
-		if(!ros::ok())
-			break;
 	}
+	else{
+		for(unsigned int i=0;i<files.size();i++)
+		{
+			cv::Mat imageDist = cv::imread(files[i], CV_LOAD_IMAGE_GRAYSCALE);
+
+			if(imageDist.rows != h_inp || imageDist.cols != w_inp)
+			{
+				if(imageDist.rows * imageDist.cols == 0)
+					printf("failed to load image %s! skipping.\n", files[i].c_str());
+				else
+					printf("image %s has wrong dimensions - expecting %d x %d, found %d x %d. Skipping.\n",
+							files[i].c_str(),
+							w,h,imageDist.cols, imageDist.rows);
+				continue;
+			}
+			assert(imageDist.type() == CV_8U);
+
+			undistorter->undistort(imageDist, image);
+			assert(image.type() == CV_8U);
+
+
+			if(runningIDX == 0)
+				system->randomInit(image.data, fakeTimeStamp, runningIDX);
+			else
+				system->trackFrame(image.data, runningIDX ,hz == 0,fakeTimeStamp);
+
+
+			runningIDX++;
+			fakeTimeStamp+=0.03;
+
+			if(hz != 0)
+				r.sleep();
+
+			if(fullResetRequested)
+			{
+
+				printf("FULL RESET!\n");
+				delete system;
+
+				system = new SlamSystem(w, h, K, doSlam);
+				system->setVisualization(outputWrapper);
+
+				fullResetRequested = false;
+				runningIDX = 0;
+			}
+
+			ros::spinOnce();
+
+			if(!ros::ok())
+				break;
+		}
+	}
+// end added
 
 
 	system->finalize();
